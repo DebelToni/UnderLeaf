@@ -153,8 +153,11 @@ export function registerFileRoutes(app: FastifyInstance, context: AppContext): v
         revision: revision.revision_hash,
         content: file.kind === 'text' ? Buffer.from(revision.content).toString('utf8') : undefined,
         contentBase64: file.kind === 'binary' ? Buffer.from(revision.content).toString('base64') : undefined,
-        actor: { type: revision.actor_type, id: revision.actor_id, name: revision.actor_name },
-        createdAt: revision.created_at
+        actorType: revision.actor_type,
+        actorId: revision.actor_id,
+        actorName: revision.actor_name,
+        createdAt: revision.created_at,
+        size: Buffer.from(revision.content).byteLength
       }
     };
   });
