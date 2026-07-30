@@ -1,0 +1,248 @@
+import { config } from './config.js';
+
+const auth = [{ bearerAuth: [] }];
+const projectHash = parameter('projectHash', 'path', true, { type: 'string' }, 'Opaque project hash supplied by the owner');
+const fileId = parameter('fileId', 'path', true, { type: 'string', format: 'uuid' });
+const revisionId = parameter('revisionId', 'path', true, { type: 'string', format: 'uuid' });
+const jobId = parameter('jobId', 'path', true, { type: 'string', format: 'uuid' });
+const ifMatch = parameter('If-Match', 'header', true, { type: 'string' }, 'Current revision from GET/ETag');
+const error = (description = 'Request failed') => response(description, 'ErrorEnvelope');
+const binary = (description: string, contentType: string) => ({
+  description,
+  content: { [contentType]: { schema: { type: 'string', format: 'binary' } } }
+});
+
+export const openapi = {
+  openapi: '3.1.0',
+  info: {
+    title: 'UnderLeaf Agent API',
+    version: '0.1.0',
+    description:
+      'Project-scoped, revision-safe REST access. Resolve the current API base from the stable discovery JSON, use the agent password as a Bearer token, and send If-Match on every mutation of an existing file.'
+  },
+  externalDocs: {
+    description: 'Stable agent guide and discovery contract',
+    url: config.publicDiscoveryUrl.replace(/api\.json(?:\?.*)?$/, 'agent-guide.md')
+  },
+  servers: [{ url: '/', description: 'Current backend returned by the discovery document' }],
+  security: auth,
+  tags: [{ name: 'Agent' }, { name: 'Projects' }, { name: 'Files' }, { name: 'Compile' }],
+  paths: {
+    '/api/v1/status': {
+      get: { operationId: 'getStatus', security: [], responses: { '200': response('Backend status', 'Status') } }
+    },
+    '/api/v1/agent/context': {
+      get: {
+        operationId: 'getAgentContext', tags: ['Agent'],
+        responses: { '200': response('Credential scope and capabilities', 'AgentContext'), '401': error() }
+      }
+    },
+    '/api/v1/projects/{projectHash}': {
+      get: {
+        operationId: 'getProject', tags: ['Projects'], parameters: [projectHash],
+        responses: { '200': response('Project metadata', 'ProjectEnvelope'), '404': error('Project not found') }
+      }
+    },
+    '/api/v1/projects/{projectHash}/files': {
+      get: {
+        operationId: 'listFiles', tags: ['Files'], parameters: [projectHash],
+        responses: { '200': response('Project file tree', 'FileListEnvelope'), '404': error() }
+      },
+      post: {
+        operationId: 'createFile', tags: ['Files'], parameters: [projectHash],
+        requestBody: jsonBody('CreateFile'),
+        responses: { '201': response('File created', 'FileEnvelope'), '409': error('Path already exists'), '413': error('File too large') }
+      }
+    },
+    '/api/v1/projects/{projectHash}/files/{fileId}': {
+      get: {
+        operationId: 'getFile', tags: ['Files'], parameters: [projectHash, fileId],
+        responses: { '200': withEtag(response('File content and current revision', 'FileEnvelope')), '404': error() }
+      },
+      put: {
+        operationId: 'replaceFile', tags: ['Files'], parameters: [projectHash, fileId, ifMatch],
+        requestBody: jsonBody('FileContent'),
+        responses: mutationResponses('FileEnvelope')
+      },
+      patch: {
+        operationId: 'renameFile', tags: ['Files'], parameters: [projectHash, fileId, ifMatch],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { type: 'object', required: ['path'], properties: { path: { type: 'string' } } } } }
+        },
+        responses: mutationResponses('FileEnvelope')
+      },
+      delete: {
+        operationId: 'deleteFile', tags: ['Files'], parameters: [projectHash, fileId, ifMatch],
+        responses: { '204': { description: 'File deleted' }, '409': error('Revision conflict'), '428': error('If-Match required') }
+      }
+    },
+    '/api/v1/projects/{projectHash}/files/{fileId}/raw': {
+      get: {
+        operationId: 'downloadRawFile', tags: ['Files'], parameters: [projectHash, fileId],
+        responses: { '200': withEtag(binary('Raw file bytes', 'application/octet-stream')), '404': error() }
+      }
+    },
+    '/api/v1/projects/{projectHash}/files/{fileId}/revisions': {
+      get: {
+        operationId: 'listFileRevisions', tags: ['Files'], parameters: [projectHash, fileId],
+        responses: { '200': response('Latest 200 revisions', 'RevisionListEnvelope'), '404': error() }
+      }
+    },
+    '/api/v1/projects/{projectHash}/files/{fileId}/revisions/{revisionId}': {
+      get: {
+        operationId: 'getFileRevision', tags: ['Files'], parameters: [projectHash, fileId, revisionId],
+        responses: { '200': response('Historical content', 'RevisionEnvelope'), '404': error() }
+      }
+    },
+    '/api/v1/projects/{projectHash}/files/{fileId}/revisions/{revisionId}/restore': {
+      post: {
+        operationId: 'restoreFileRevision', tags: ['Files'], parameters: [projectHash, fileId, revisionId, ifMatch],
+        responses: mutationResponses('FileEnvelope')
+      }
+    },
+    '/api/v1/projects/{projectHash}/compile': {
+      post: {
+        operationId: 'startCompile', tags: ['Compile'], parameters: [projectHash],
+        responses: {
+          '200': response('Cached result', 'CompileEnvelope'),
+          '202': response('Compile queued', 'CompileEnvelope'),
+          '400': error('Entry file missing')
+        }
+      }
+    },
+    '/api/v1/projects/{projectHash}/compile/latest': {
+      get: {
+        operationId: 'getLatestCompile', tags: ['Compile'], parameters: [projectHash],
+        responses: { '200': response('Latest project compile, if any', 'NullableCompileEnvelope') }
+      }
+    },
+    '/api/v1/projects/{projectHash}/compile/{jobId}': {
+      get: {
+        operationId: 'getCompileJob', tags: ['Compile'], parameters: [projectHash, jobId],
+        responses: { '200': response('Specific compile status and log', 'CompileEnvelope'), '404': error() }
+      }
+    },
+    '/api/v1/projects/{projectHash}/compile/{jobId}/pdf': {
+      get: {
+        operationId: 'downloadCompiledPdf', tags: ['Compile'], parameters: [projectHash, jobId],
+        responses: { '200': binary('Immutable PDF for this job', 'application/pdf'), '404': error() }
+      }
+    },
+    '/api/v1/projects/{projectHash}/pdf': {
+      get: {
+        operationId: 'downloadLatestPdf', tags: ['Compile'], parameters: [projectHash],
+        responses: { '200': withEtag(binary('Latest successful PDF', 'application/pdf')), '404': error() }
+      }
+    },
+    '/api/v1/projects/{projectHash}/export.zip': {
+      get: {
+        operationId: 'exportProject', tags: ['Projects'], parameters: [projectHash],
+        responses: { '200': binary('Project source archive', 'application/zip') }
+      }
+    }
+  },
+  components: {
+    securitySchemes: {
+      bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'UnderLeaf project agent password' }
+    },
+    schemas: {
+      ErrorEnvelope: {
+        type: 'object', required: ['error'], properties: {
+          error: { type: 'object', required: ['code', 'message'], properties: { code: { type: 'string' }, message: { type: 'string' }, details: {} } }
+        }
+      },
+      DiscoveryDocument: {
+        type: 'object', required: ['online', 'apiBase', 'updatedAt'], properties: {
+          online: { type: 'boolean' }, apiBase: { type: 'string', format: 'uri' }, updatedAt: { type: ['string', 'null'], format: 'date-time' }
+        }, example: { online: true, apiBase: 'https://example.trycloudflare.com', updatedAt: '2026-07-30T20:00:00.000Z' }
+      },
+      Status: {
+        type: 'object', required: ['ok', 'name', 'version', 'setupRequired', 'discoveryUrl', 'serverTime'], properties: {
+          ok: { type: 'boolean' }, name: { type: 'string' }, version: { type: 'string' }, setupRequired: { type: 'boolean' },
+          discoveryUrl: { type: 'string', format: 'uri' }, serverTime: { type: 'string', format: 'date-time' }
+        }
+      },
+      Project: {
+        type: 'object', required: ['hash', 'name', 'entryFile', 'owner', 'role', 'canWrite', 'canManage', 'memberCount', 'createdAt', 'updatedAt'], properties: {
+          hash: { type: 'string' }, name: { type: 'string' }, entryFile: { type: 'string' }, owner: { type: 'string' },
+          role: { enum: ['owner', 'editor', 'viewer', 'agent'] }, canWrite: { type: 'boolean' }, canManage: { type: 'boolean' },
+          memberCount: { type: 'integer' }, createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' }, latestCompile: { oneOf: [{ $ref: '#/components/schemas/CompileSummary' }, { type: 'null' }] }
+        }
+      },
+      ProjectEnvelope: envelope('project', 'Project'),
+      ProjectFile: {
+        type: 'object', required: ['id', 'path', 'kind', 'mimeType', 'revision', 'size', 'createdAt', 'updatedAt'], properties: {
+          id: { type: 'string', format: 'uuid' }, path: { type: 'string' }, kind: { enum: ['text', 'binary'] }, mimeType: { type: 'string' },
+          revision: { type: 'string' }, size: { type: 'integer' }, content: { type: 'string' }, contentBase64: { type: 'string', contentEncoding: 'base64' },
+          createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' }
+        }
+      },
+      FileEnvelope: envelope('file', 'ProjectFile'),
+      FileListEnvelope: { type: 'object', required: ['files'], properties: { files: { type: 'array', items: { $ref: '#/components/schemas/ProjectFile' } } } },
+      CreateFile: {
+        type: 'object', required: ['path'], oneOf: [{ required: ['content'] }, { required: ['contentBase64'] }], properties: {
+          path: { type: 'string' }, content: { type: 'string' }, contentBase64: { type: 'string', contentEncoding: 'base64' }, mimeType: { type: 'string' }
+        }
+      },
+      FileContent: {
+        type: 'object', oneOf: [{ required: ['content'] }, { required: ['contentBase64'] }], properties: {
+          content: { type: 'string' }, contentBase64: { type: 'string', contentEncoding: 'base64' }
+        }
+      },
+      FileRevision: {
+        type: 'object', required: ['id', 'revision', 'actorType', 'actorId', 'actorName', 'createdAt'], properties: {
+          id: { type: 'string', format: 'uuid' }, revision: { type: 'string' }, actorType: { enum: ['user', 'agent', 'system'] }, actorId: { type: 'string' }, actorName: { type: 'string' },
+          createdAt: { type: 'string', format: 'date-time' }, size: { type: 'integer' }, content: { type: 'string' }, contentBase64: { type: 'string', contentEncoding: 'base64' }
+        }
+      },
+      RevisionEnvelope: envelope('revision', 'FileRevision'),
+      RevisionListEnvelope: { type: 'object', required: ['revisions'], properties: { revisions: { type: 'array', items: { $ref: '#/components/schemas/FileRevision' } } } },
+      Actor: { type: 'object', required: ['type', 'id', 'name'], properties: { type: { enum: ['user', 'agent', 'system'] }, id: { type: 'string' }, name: { type: 'string' } } },
+      CompileSummary: { type: 'object', required: ['id', 'status', 'hasPdf'], properties: { id: { type: 'string', format: 'uuid' }, status: { $ref: '#/components/schemas/CompileStatus' }, finishedAt: { type: ['string', 'null'], format: 'date-time' }, hasPdf: { type: 'boolean' } } },
+      CompileStatus: { enum: ['queued', 'compiling', 'succeeded', 'failed', 'cancelled'] },
+      CompileJob: {
+        type: 'object', required: ['id', 'sourceHash', 'status', 'entryFile', 'log', 'requestedBy', 'createdAt', 'hasPdf', 'hasSynctex'], properties: {
+          id: { type: 'string', format: 'uuid' }, sourceHash: { type: 'string' }, status: { $ref: '#/components/schemas/CompileStatus' }, entryFile: { type: 'string' }, log: { type: 'string' }, error: { type: ['string', 'null'] }, requestedBy: { $ref: '#/components/schemas/Actor' },
+          createdAt: { type: 'string', format: 'date-time' }, startedAt: { type: ['string', 'null'], format: 'date-time' }, finishedAt: { type: ['string', 'null'], format: 'date-time' }, hasPdf: { type: 'boolean' }, hasSynctex: { type: 'boolean' }
+        }
+      },
+      CompileEnvelope: envelope('job', 'CompileJob'),
+      NullableCompileEnvelope: { type: 'object', required: ['job'], properties: { job: { oneOf: [{ $ref: '#/components/schemas/CompileJob' }, { type: 'null' }] } } },
+      AgentContext: {
+        type: 'object', required: ['project', 'capabilities', 'concurrency', 'openapi'], properties: {
+          project: { $ref: '#/components/schemas/Project' }, capabilities: { type: 'array', items: { type: 'string' } },
+          concurrency: { type: 'object', required: ['mutationsRequireIfMatch', 'conflictStatus'], properties: { mutationsRequireIfMatch: { type: 'boolean' }, conflictStatus: { type: 'integer' } } }, openapi: { type: 'string' }
+        }
+      }
+    }
+  }
+} as const;
+
+function parameter(name: string, location: string, required: boolean, schema: object, description?: string) {
+  return { name, in: location, required, schema, ...(description ? { description } : {}) };
+}
+
+function response(description: string, schemaName: string) {
+  return { description, content: { 'application/json': { schema: { $ref: `#/components/schemas/${schemaName}` } } } };
+}
+
+function withEtag<T extends object>(value: T) {
+  return { ...value, headers: { ETag: { description: 'Current revision', schema: { type: 'string' } } } };
+}
+
+function jsonBody(schemaName: string) {
+  return { required: true, content: { 'application/json': { schema: { $ref: `#/components/schemas/${schemaName}` } } } };
+}
+
+function mutationResponses(schemaName: string) {
+  return {
+    '200': withEtag(response('Mutation applied and broadcast to collaborators', schemaName)),
+    '409': error('Revision conflict; fetch and merge before retrying'),
+    '428': error('If-Match is required for agent mutations')
+  };
+}
+
+function envelope(property: string, schemaName: string) {
+  return { type: 'object', required: [property], properties: { [property]: { $ref: `#/components/schemas/${schemaName}` } } };
+}

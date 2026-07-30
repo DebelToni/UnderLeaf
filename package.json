@@ -1,0 +1,29 @@
+{
+  "name": "underleaf",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "packageManager": "pnpm@10.27.0",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @underleaf/server --filter @underleaf/web dev",
+    "dev:server": "pnpm --filter @underleaf/server dev",
+    "dev:web": "pnpm --filter @underleaf/web dev",
+    "build": "pnpm -r build",
+    "build:pages": "pnpm --filter @underleaf/web build:pages",
+    "start": "pnpm --filter @underleaf/server start",
+    "start:tunnel": "node scripts/tunnel.mjs",
+    "admin:create": "pnpm --filter @underleaf/server admin:create",
+    "backup": "node scripts/backup.mjs",
+    "test": "pnpm -r test",
+    "test:api": "pnpm --filter @underleaf/server test",
+    "test:web": "pnpm --filter @underleaf/web test",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

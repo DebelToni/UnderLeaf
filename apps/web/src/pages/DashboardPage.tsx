@@ -1,0 +1,96 @@
+import { ArrowRight, FileArchive, LogOut, Plus, Settings2, Upload } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Brand } from '../components/Brand';
+import { AccountDialog, NewProjectDialog, InvitesDialog } from '../components/DashboardDialogs';
+import { InlineError, LoadingBlock } from '../components/Feedback';
+import { ThemeControl } from '../components/ThemeControl';
+import { useTheme } from '../hooks/useTheme';
+import { relativeTime } from '../lib/format';
+import { useSession } from '../lib/session';
+import type { ProjectSummary, Template } from '../types';
+
+export function DashboardPage() {
+  const { api, user, clearSession } = useSession();
+  const theme = useTheme();
+  const navigate = useNavigate();
+  const importInput = useRef<HTMLInputElement>(null);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [importing, setImporting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [newOpen, setNewOpen] = useState(false);
+  const [invitesOpen, setInvitesOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+
+  async function load() {
+    setLoading(true); setError(null);
+    try {
+      const [projectResponse, templateResponse] = await Promise.all([api.listProjects(), api.listTemplates()]);
+      setProjects(projectResponse.projects); setTemplates(templateResponse.templates);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not load projects'); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { void load(); }, [api]);
+
+  async function logout() {
+    try { await api.logout(); } catch { /* Session is cleared locally either way. */ }
+    clearSession();
+  }
+
+  async function create(name: string, template: string) {
+    const response = await api.createProject(name, template);
+    navigate(`/project/${response.project.hash}`);
+  }
+
+  async function importZip(file: File) {
+    setImporting(true); setError(null);
+    try { const response = await api.importProject(file); navigate(`/project/${response.project.hash}`); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not import ZIP'); }
+    finally { setImporting(false); }
+  }
+
+  return <div className="dashboard-shell">
+    <header className="dashboard-head">
+      <Brand subtitle="Collaborative LaTeX studio"/>
+      <div className="dashboard-head__actions">
+        <ThemeControl value={theme.preference} onChange={theme.setPreference}/>
+        {user?.isAdmin && <button className="plain-button admin-invites-button" type="button" onClick={() => setInvitesOpen(true)}><Settings2 size={14}/><span>Invitations</span></button>}
+        <button type="button" className="user-chip" onClick={() => setAccountOpen(true)}><b>{user?.displayName}</b><small>{user?.isAdmin ? 'ADMIN' : 'MEMBER'}</small></button>
+        <button className="icon-button" type="button" onClick={() => void logout()} aria-label="Log out" title="Log out"><LogOut size={16}/></button>
+      </div>
+    </header>
+    <div className="accent-line"/>
+    <main className="dashboard-main">
+      <section className="dashboard-intro">
+        <div><div className="eyebrow">Your workspace</div><h1>Documents, together.</h1><p>Write, compile, and collaborate with people or agents from one quiet workspace.</p></div>
+        <div className="dashboard-intro__actions">
+          <button className="secondary-button" type="button" onClick={() => importInput.current?.click()} disabled={importing}><Upload size={15}/>{importing ? 'Importing…' : 'Import ZIP'}</button>
+          <input ref={importInput} hidden type="file" accept=".zip,application/zip" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importZip(file); event.target.value = ''; }}/>
+          <button className="primary-button" type="button" onClick={() => setNewOpen(true)}><Plus size={15}/> New project</button>
+        </div>
+      </section>
+      <InlineError message={error}/>
+      <section className="project-section" aria-labelledby="projects-title">
+        <header><h2 id="projects-title">Projects</h2><span>{projects.length.toString().padStart(2, '0')}</span></header>
+        {loading ? <LoadingBlock label="Loading projects"/> : <div className="project-list">
+          {projects.length === 0 && <div className="dashboard-empty"><FileArchive size={28}/><h3>No projects yet.</h3><p>Begin with a clean template or import an existing ZIP archive.</p><button className="plain-button" type="button" onClick={() => setNewOpen(true)}>Create your first project <ArrowRight size={14}/></button></div>}
+          {projects.map((project, index) => <button key={project.hash} type="button" className="project-row" onClick={() => navigate(`/project/${project.hash}`)}>
+            <span className="project-row__number">{String(index + 1).padStart(2, '0')}</span>
+            <span className="project-row__main"><strong>{project.name}</strong><small>{project.entryFile}</small></span>
+            <span className="project-row__meta"><small>OWNER</small><b>{project.owner}</b></span>
+            <span className="project-row__meta"><small>ACCESS</small><b>{project.role}</b></span>
+            <span className="project-row__meta"><small>UPDATED</small><b>{relativeTime(project.updatedAt)}</b></span>
+            <span className={`compile-chip compile-chip--${project.latestCompileStatus ?? 'none'}`}><i/>{project.latestCompileStatus ?? 'Not compiled'}</span>
+            <ArrowRight className="project-row__arrow" size={17}/>
+          </button>)}
+        </div>}
+      </section>
+    </main>
+    <footer className="dashboard-footer"><span>UNDERLEAF · PRIVATE OPEN-SOURCE STUDIO</span><a href="https://github.com/DebelToni/UnderLeaf" target="_blank" rel="noreferrer">Source</a></footer>
+    <NewProjectDialog open={newOpen} templates={templates} onClose={() => setNewOpen(false)} onCreate={create}/>
+    {user?.isAdmin && <InvitesDialog open={invitesOpen} onClose={() => setInvitesOpen(false)} api={api}/>}
+    {user && <AccountDialog open={accountOpen} onClose={() => setAccountOpen(false)} api={api} username={user.username}/>} 
+  </div>;
+}
