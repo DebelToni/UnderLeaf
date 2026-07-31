@@ -81,14 +81,12 @@ export class TicketedYProvider {
       socket.binaryType = 'arraybuffer';
       this.socket = socket;
       socket.addEventListener('open', () => {
-        this.retry = 0;
         this.setStatus('synchronizing');
         const sync = encoding.createEncoder();
         encoding.writeVarUint(sync, MESSAGE_SYNC);
         syncProtocol.writeSyncStep1(sync, this.doc);
         socket.send(encoding.toUint8Array(sync));
-        const clients = [...this.awareness.getStates().keys()];
-        if (clients.length) this.sendAwareness(clients);
+        if (this.awareness.getLocalState() != null) this.sendAwareness([this.doc.clientID]);
       });
       socket.addEventListener('message', (event) => this.receive(new Uint8Array(event.data as ArrayBuffer)));
       socket.addEventListener('close', () => {
@@ -116,7 +114,10 @@ export class TicketedYProvider {
         if (encoding.length(response) > 1 && this.socket?.readyState === WebSocket.OPEN) {
           this.socket.send(encoding.toUint8Array(response));
         }
-        if (syncType === syncProtocol.messageYjsSyncStep2) this.setStatus('connected');
+        if (syncType === syncProtocol.messageYjsSyncStep2) {
+          this.retry = 0;
+          this.setStatus('connected');
+        }
       } else if (type === MESSAGE_AWARENESS) {
         awarenessProtocol.applyAwarenessUpdate(this.awareness, decoding.readVarUint8Array(decoder), this);
       } else if (type === MESSAGE_FLUSH_ACK) {
