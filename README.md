@@ -1,99 +1,228 @@
+<div align="center">
+
 # UnderLeaf
 
-A small, invite-only collaborative LaTeX studio for people and software agents. The browser editor is hosted on GitHub Pages; projects, accounts, compilation, and history stay on the local machine behind a rotating Cloudflare Quick Tunnel.
+**A private, invite-only collaborative LaTeX studio for people and software agents.**
 
-UnderLeaf is independent and unaffiliated with Underleaf.ai or Overleaf.
+[Hosted app](https://debeltoni.github.io/UnderLeaf/) · [Agent guide](https://debeltoni.github.io/UnderLeaf/agent-guide.md) · [Questions / chat](https://github.com/DebelToni/UnderLeaf/issues/new)
 
-## Features
+[![CI](https://github.com/DebelToni/UnderLeaf/actions/workflows/ci.yml/badge.svg)](https://github.com/DebelToni/UnderLeaf/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/DebelToni/UnderLeaf/actions/workflows/codeql.yml/badge.svg)](https://github.com/DebelToni/UnderLeaf/actions/workflows/codeql.yml)
+[![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-5e6ad2.svg)](LICENSE)
 
-- Multi-file CodeMirror LaTeX editor with Yjs/WebSocket collaboration and presence
-- Cached, pre-warmed Tectonic compilation in a restricted Docker worker
-- Live compile status, logs, PDF updates, and direct agent edits
-- PDF.js preview that preserves exact scroll coordinates, page, and zoom after recompilation
-- One-click PDF-only focus mode; `Escape` returns to the editor
-- Templates, uploads, ZIP import/export, revisions, restore, owner/editor/viewer sharing
-- Invite-only username/password accounts; no email or 2FA
-- Project-scoped, revocable agent passwords with revision-safe REST access and OpenAPI
-- SQLite persistence and daily three-snapshot SSD backups
-- Responsive light/dark/system interface
+</div>
+
+<p align="center">
+  <img src=".github/readme/workspace.png" alt="UnderLeaf desktop workspace with file tree, collaborative LaTeX editor, and PDF preview" width="100%">
+</p>
+
+<p align="center">
+  <img src=".github/readme/dashboard.png" alt="UnderLeaf project dashboard in dark mode" width="68%">
+  &nbsp;
+  <img src=".github/readme/mobile.png" alt="UnderLeaf mobile PDF workspace" width="25%">
+</p>
+
+UnderLeaf keeps accounts, projects, revision history, and compilation on your own machine while serving its browser interface from a stable GitHub Pages URL. A rotating Cloudflare Quick Tunnel connects that interface to the local backend without exposing a permanent inbound port.
+
+The hosted instance is private and currently accepts new members through single-use invitation links. Questions about using or hosting UnderLeaf are welcome in [GitHub Issues](https://github.com/DebelToni/UnderLeaf/issues).
+
+UnderLeaf is independent and unaffiliated with Overleaf or Underleaf.ai.
+
+## What it includes
+
+- Multi-file CodeMirror LaTeX editor with live Yjs/WebSocket collaboration and presence
+- Owner, editor, and viewer project roles
+- Restricted Docker/Tectonic compilation with a warm worker and persistent package cache
+- Live compile state, logs, PDF replacement, and source-aware revision history
+- PDF viewer that preserves page, zoom, and exact scroll position after recompilation
+- One-click PDF-only mode with `Escape` to return
+- Article, report, presentation, and blank templates; file uploads and ZIP import/export
+- Light, dark, and system appearance across desktop and mobile layouts
+- Project-scoped, revocable credentials for external agents
+- SQLite persistence plus an online backup command with bounded snapshot retention
+
+## Using the hosted instance
+
+### 1. Register with an invitation
+
+An administrator opens **Invitations**, selects **New invitation**, and sends the generated link privately.
+
+- Each invitation can register one account.
+- The link expires after seven days when created through the interface.
+- Registration needs only a username and password.
+- Registering does not automatically reveal or share any project.
+
+Create a separate invitation for every person. If a link is consumed by the wrong person, create a replacement rather than sharing an account.
+
+### 2. Create and share a project
+
+1. Select **New project** on the dashboard.
+2. Name it and choose a starting template.
+3. Open **Share** inside the project.
+4. Add the collaborator's exact registered username as **Editor** or **Viewer**.
+5. The collaborator refreshes their dashboard and opens the shared project.
+
+Editors can work in the same text file simultaneously. Presence appears in the header, changes synchronize live, and **History** records who produced each saved revision.
+
+### 3. Compile and review
+
+Select **Compile** to flush the current collaborative editor state and run Tectonic. Successful output appears in the PDF pane for every connected collaborator. A completely empty document body has no printable page, so add content between `\begin{document}` and `\end{document}` before compiling a blank template.
+
+## External agent access
+
+UnderLeaf does not embed an AI model or chat interface. A project owner can authorize an external coding agent to edit the project directly:
+
+1. Open **Agents** in the project.
+2. Create a named credential.
+3. Give the agent the stable discovery link, project hash, and one-time password shown by UnderLeaf.
+
+The credential grants access to that project only and can be revoked independently. Agents can read and edit files, create and restore revisions, compile, download PDFs, and export ZIP archives through the REST API. Mutations use `If-Match` revisions so an agent cannot silently overwrite a newer collaborator change.
+
+- Human/agent guide: [`docs/agent-guide.md`](docs/agent-guide.md)
+- Live guide: https://debeltoni.github.io/UnderLeaf/agent-guide.md
+- OpenAPI: `/api/v1/openapi.json` on the discovered backend
 
 ## Architecture
 
 ```text
 GitHub Pages frontend
-        │ reads api.json
+        │ reads api.json from a stable URL
         ▼
 Cloudflare Quick Tunnel ──► local Fastify server
-                              ├─ SQLite + revisions
-                              ├─ Yjs WebSockets
-                              └─ warm Docker/Tectonic worker
+                              ├─ SQLite accounts, projects, and revisions
+                              ├─ Yjs collaboration and project WebSockets
+                              └─ warm restricted Docker/Tectonic worker
 ```
 
-All project source is stored in `data/underleaf.sqlite3`. Generated PDFs are cached by a hash of every project file. `data/` and `.env` are intentionally ignored by Git.
+The Quick Tunnel hostname may change whenever the host restarts. `scripts/tunnel.mjs` publishes the current hostname to `docs/api.json`, so users and agents keep one stable discovery URL.
 
-## Requirements
+## Self-hosting
 
-- Node.js 24+
-- pnpm 10.27+
-- Docker Desktop
+### Requirements
+
+- Node.js 24 or newer
+- pnpm 10.27
+- Docker Desktop or another compatible Docker engine
 - `cloudflared`
-- Git and GitHub CLI for publishing
+- Git with permission to push to your GitHub repository
+- A GitHub repository with Pages enabled
 
-The required tools are already installed on the intended macOS host.
+On macOS, Docker Desktop and `cloudflared` can be installed with their official installers or Homebrew. Confirm that Docker is running before the first compile.
 
-## First run
+### 1. Fork or clone
+
+Keep the repository name `UnderLeaf` for the existing Pages base path:
 
 ```bash
-pnpm install
+git clone git@github.com:YOUR_USER/UnderLeaf.git
+cd UnderLeaf
+pnpm install --frozen-lockfile
+cp .env.example .env
+```
+
+If you use a different repository name, update `base` in `apps/web/vite.config.ts` to `/<repository-name>/`.
+
+### 2. Configure the deployment
+
+Edit `.env` and replace the example account with your GitHub Pages origin and discovery URL:
+
+```dotenv
+UNDERLEAF_HOST=127.0.0.1
+UNDERLEAF_PORT=4317
+UNDERLEAF_DATA_DIR=./data
+UNDERLEAF_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,https://YOUR_USER.github.io
+UNDERLEAF_PUBLIC_DISCOVERY_URL=https://YOUR_USER.github.io/UnderLeaf/api.json
+UNDERLEAF_TRUST_PROXY=true
+```
+
+For a custom domain, use its exact origin in `UNDERLEAF_ALLOWED_ORIGINS` and its full `api.json` URL in `UNDERLEAF_PUBLIC_DISCOVERY_URL`. Keep `.env` private; it is ignored by Git.
+
+In the GitHub repository settings, configure **Pages** to deploy from the `main` branch and `/docs` directory. Make sure the local `origin` remote can push to that repository.
+
+### 3. Create the first administrator
+
+```bash
 pnpm admin:create
+```
+
+The command creates `data/underleaf.sqlite3` and asks for the initial username and password. Run it again with an existing username to promote that account to administrator.
+
+### 4. Start UnderLeaf
+
+For an interactive process:
+
+```bash
 pnpm start:tunnel
 ```
 
-`admin:create` asks for the first username and password. The administrator creates single-use invitation links from the dashboard. `start:tunnel` builds the app, starts the backend and Quick Tunnel, writes the live endpoint to `docs/api.json`, and pushes the Pages update. Stopping it marks the discovery document offline.
+The supervisor builds the server and Pages frontend, starts the backend, requests a Quick Tunnel, verifies public health, and commits the working discovery document to `main`. Press `Ctrl+C` for a graceful stop; it flushes active collaboration and publishes the offline state.
 
-For local development without Pages:
+For a persistent process:
+
+```bash
+nohup node scripts/tunnel.mjs > data/underleaf.log 2>&1 < /dev/null &
+echo $! > data/tunnel.pid
+```
+
+Stop that process gracefully with:
+
+```bash
+kill -INT "$(cat data/tunnel.pid)"
+```
+
+Do not use `kill -9` during normal maintenance because graceful shutdown persists active collaborative documents before the server exits.
+
+### 5. Create invitations
+
+Open the Pages URL, sign in as the administrator, and create one invitation per user from **Invitations**. After they register, project owners share individual projects with their usernames.
+
+## Compilation isolation
+
+The first real compile builds `underleaf-tectonic:0.16.9` if necessary and starts `underleaf-tectonic-worker`. It runs as an unprivileged user with dropped capabilities, a read-only root filesystem, PID/CPU/memory limits, Tectonic `--untrusted`, and a compile timeout. Only the jobs directory is writable; downloaded packages remain in the `underleaf-tectonic-cache` Docker volume.
+
+The cache key includes the entry file, compiler context, flags, paths, and every source revision. An identical project state reuses its existing PDF immediately.
+
+## Data and backups
+
+Runtime state lives under `data/` and is intentionally ignored by Git:
+
+- `underleaf.sqlite3` — users, projects, files, Yjs state, revisions, and audit records
+- `compile-cache/` — generated PDFs, logs, and SyncTeX artifacts
+- `jobs/` — transient compilation workspaces
+
+Create an online backup while the server is running:
+
+```bash
+UNDERLEAF_BACKUP_DIR=/path/to/UnderLeaf-backups pnpm backup
+```
+
+The command uses SQLite's online backup API, checks the copied database with `PRAGMA integrity_check`, copies cached artifacts, excludes plaintext secrets, and retains the latest three snapshots. Schedule it with cron or your service manager; this repository does not install a host-specific schedule automatically.
+
+Before upgrades or restoration, take a fresh backup and stop UnderLeaf gracefully. Restore by replacing `data/underleaf.sqlite3` with a verified snapshot while the server is stopped, then restart the tunnel supervisor.
+
+## Local development
 
 ```bash
 pnpm dev
 ```
 
-Open `http://localhost:5173`. The development frontend uses `http://127.0.0.1:4317` directly.
+Open http://localhost:5173. The development frontend connects directly to http://127.0.0.1:4317.
 
-## Agent access
-
-A project owner opens **Agents**, creates a credential, and gives the agent:
-
-1. the stable discovery link,
-2. the project hash,
-3. the one-time project password.
-
-The stable guide is at `https://debeltoni.github.io/UnderLeaf/agent-guide.md`; the machine-readable API is served at `/api/v1/openapi.json`. Agent mutations require the latest file revision in `If-Match`, so a collaborator cannot be overwritten silently.
-
-## Compilation
-
-The first real compile builds `underleaf-tectonic:0.16.9` if needed and starts `underleaf-tectonic-worker`. The container runs as an unprivileged user with dropped capabilities, a read-only root filesystem, PID/CPU/memory limits, Tectonic `--untrusted`, and a timeout. Its package cache persists in the `underleaf-tectonic-cache` Docker volume. Identical project states reuse the prior PDF immediately.
-
-## Backups
-
-```bash
-pnpm backup
-```
-
-The default destination is `/Volumes/SSD/backups/UnderLeaf/`. Each snapshot contains an online SQLite backup, its integrity result, and the PDF cache; `.env` and plaintext credentials are excluded. Only the latest three daily snapshots remain.
-
-The installed cron wrapper is `~/Documents/cron/underleaf-backup.sh` and runs at 03:00. Restore by stopping UnderLeaf and replacing `data/underleaf.sqlite3` with a snapshot database.
-
-## Quality checks
+Run every quality gate with:
 
 ```bash
 pnpm check
 ```
 
-This runs linting, strict TypeScript checks, API/frontend tests, and production builds. CI repeats the same checks and CodeQL scans JavaScript/TypeScript changes.
+This performs ESLint, strict TypeScript checks, backend/frontend tests, and production builds. CI runs the same command, and CodeQL scans JavaScript and TypeScript changes.
 
-## Security model
+## Security scope
 
-This deployment is intended for a small trusted group. Passwords use scrypt; session, invite, and agent secrets are hashed at rest. Persistent bearer secrets never appear in WebSocket URLs. Project paths and ZIP imports are constrained, CORS is allowlisted, and compilation is isolated from the host. A Quick Tunnel is not an availability guarantee; when the host sleeps, the Pages app reports the server offline.
+UnderLeaf is designed for a small trusted group rather than public registration. Passwords use scrypt; session, invitation, WebSocket, and agent secrets are stored as hashes or short-lived one-use tickets. ZIP extraction and project paths are bounded, CORS is allowlisted, and LaTeX compilation is isolated from the host.
+
+A Quick Tunnel is convenient discovery, not an uptime guarantee. If the host sleeps or loses connectivity, the Pages frontend reports the backend offline while the SQLite data remains on the host.
+
+Please report security concerns according to [SECURITY.md](SECURITY.md).
 
 ## License
 
