@@ -1,5 +1,5 @@
 {
-  "online": false,
-  "apiBase": "",
-  "updatedAt": "2026-07-31T19:26:24.673Z"
+  "online": true,
+  "apiBase": "https://stations-lower-melissa-belong.trycloudflare.com",
+  "updatedAt": "2026-07-31T19:26:41.589Z"
 }
