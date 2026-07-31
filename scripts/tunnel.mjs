@@ -21,8 +21,6 @@ process.once('SIGTERM', () => void stop('Stopping UnderLeaf…', 0));
 try {
   run('pnpm', ['--filter', '@underleaf/server', 'build']);
   run('pnpm', ['build:pages']);
-  await writeDiscovery(false, '');
-  publish('site: mark server starting');
 
   backend = spawn(process.execPath, ['apps/server/dist/index.js'], {
     cwd: root,
