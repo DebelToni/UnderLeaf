@@ -13,7 +13,7 @@ import {
   lineNumbers,
   placeholder
 } from '@codemirror/view';
-import { yCollab } from 'y-codemirror.next';
+import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import { useEffect, useRef, useState } from 'react';
 import * as Y from 'yjs';
 import type { ApiClient } from '../lib/api';
@@ -83,7 +83,7 @@ export function EditorPane({
       closeBrackets(),
       autocompletion(),
       latex(),
-      keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
+      keymap.of([...defaultKeymap, ...editorHistoryKeymap(canWrite), ...searchKeymap, indentWithTab]),
       placeholder('Start writing LaTeX…'),
       EditorView.updateListener.of((update) => {
         if (update.selectionSet || update.docChanged) reportCursor(update.view);
@@ -164,6 +164,10 @@ export function EditorPane({
       <div ref={mount} className="editor-mount" />
     </div>
   );
+}
+
+export function editorHistoryKeymap(collaborative: boolean) {
+  return collaborative ? yUndoManagerKeymap : historyKeymap;
 }
 
 function editorTheme(dark: boolean) {
