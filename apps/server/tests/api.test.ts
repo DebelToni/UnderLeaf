@@ -1,6 +1,7 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
@@ -215,6 +216,20 @@ describe('UnderLeaf API', () => {
     expect(pdf.statusCode).toBe(200);
     expect(pdf.headers['content-type']).toContain('application/pdf');
     expect(pdf.rawPayload.subarray(0, 5).toString()).toBe('%PDF-');
+
+    const synctexPath = join(harness!.dir, 'compile-cache', `${job.source_hash}.synctex.gz`);
+    await writeFile(synctexPath, gzipSync(`SyncTeX Version:1\nInput:1:/work/job/main.tex\nMagnification:1000\nUnit:1\nX Offset:0\nY Offset:0\nContent:\n{1\n(1,10:6578176,13156352:13156352,657818,131564\nh1,10:6578176,13156352:13156352,0,0\n)\n}1\n`));
+    context.db.run('UPDATE compile_jobs SET synctex_path = ? WHERE id = ?', synctexPath, id);
+    const sourceLocation = await app.inject({
+      method: 'GET',
+      url: `/api/v1/projects/${project.hash}/compile/${id}/synctex?path=main.tex&line=10`,
+      headers: bearer(adminToken)
+    });
+    expect(sourceLocation.statusCode).toBe(200);
+    expect(sourceLocation.json()).toEqual({
+      source: { path: 'main.tex', line: 10, mappedLine: 10 },
+      highlights: [{ page: 1, x: 100, y: 190, width: 200, height: 12 }]
+    });
 
     const cached = await app.inject({
       method: 'POST',

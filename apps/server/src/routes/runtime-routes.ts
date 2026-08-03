@@ -5,8 +5,10 @@ import { actorIdentity } from '../actor.js';
 import { audit } from '../audit.js';
 import type { AppContext } from '../context.js';
 import { HttpError } from '../errors.js';
+import { normalizeProjectPath } from '../paths.js';
 import { projectAccess, requireWrite } from '../permissions.js';
 import { publicCompileJob } from '../compiler.js';
+import { locateSyncTexFile } from '../synctex.js';
 
 export function registerRuntimeRoutes(app: FastifyInstance, context: AppContext): void {
   app.post('/api/v1/projects/:hash/compile', async (request, reply) => {
@@ -48,6 +50,24 @@ export function registerRuntimeRoutes(app: FastifyInstance, context: AppContext)
       .header('ETag', `"${job.source_hash}"`)
       .type('application/pdf')
       .send(await readFile(path));
+  });
+
+  app.get('/api/v1/projects/:hash/compile/:jobId/synctex', async (request, reply) => {
+    const actor = context.auth.require(request);
+    const params = z.object({ hash: z.string(), jobId: z.string().uuid() }).parse(request.params);
+    const query = z.object({ path: z.string().min(1), line: z.coerce.number().int().min(1).max(1_000_000) }).parse(request.query);
+    const access = projectAccess(context.db, actor, params.hash);
+    const sourcePath = normalizeProjectPath(query.path);
+    const source = context.projects.getFile(access.project.id, sourcePath);
+    if (!source || source.kind !== 'text') throw new HttpError(404, 'Source file not found', 'file_not_found');
+    const job = context.compiler.get(params.jobId, access.project.id);
+    if (!job || job.status !== 'succeeded' || !job.synctex_path) {
+      throw new HttpError(404, 'SyncTeX data not found', 'synctex_not_found');
+    }
+    const location = await locateSyncTexFile(context.compiler.artifactPath(job, 'synctex'), sourcePath, query.line);
+    return reply
+      .header('Cache-Control', 'private, max-age=31536000, immutable')
+      .send({ source: { path: sourcePath, line: query.line, mappedLine: location.mappedLine }, highlights: location.highlights });
   });
 
   app.get('/api/v1/projects/:hash/pdf', async (request, reply) => {

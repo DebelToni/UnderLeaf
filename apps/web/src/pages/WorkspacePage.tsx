@@ -19,7 +19,7 @@ import { useTheme } from '../hooks/useTheme';
 import { ApiError } from '../lib/api';
 import { initials, relativeTime } from '../lib/format';
 import { useSession } from '../lib/session';
-import type { CompileJob, ProjectDetail, ProjectEvent, ProjectFile } from '../types';
+import type { CompileJob, ProjectDetail, ProjectEvent, ProjectFile, SourceLocation } from '../types';
 
 const EditorPane = lazy(() => import('../components/EditorPane').then((module) => ({ default: module.EditorPane })));
 const PdfViewer = lazy(() => import('../components/PdfViewer').then((module) => ({ default: module.PdfViewer })));
@@ -35,6 +35,8 @@ export function WorkspacePage() {
   const [job, setJob] = useState<CompileJob | null>(null);
   const [pdf, setPdf] = useState<ArrayBuffer | null>(null);
   const [pdfRevision, setPdfRevision] = useState<string | null>(null);
+  const [pdfJobId, setPdfJobId] = useState<string | null>(null);
+  const [sourceLocation, setSourceLocation] = useState<SourceLocation | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +92,7 @@ export function WorkspacePage() {
       if (requestId !== pdfRequest.current) return;
       setPdf(result.data);
       setPdfRevision(nextJob.sourceHash);
+      setPdfJobId(nextJob.hasSynctex ? nextJob.id : null);
     } catch (reason) {
       if (requestId === pdfRequest.current) setError(reason instanceof Error ? reason.message : 'Could not load PDF');
     } finally {
@@ -174,6 +177,7 @@ export function WorkspacePage() {
   }, [api, hash, job?.status, loadPdf]);
 
   const onPresence = useCallback((users: PresenceUser[]) => setPresence(users), []);
+  const onCursorChange = useCallback((location: SourceLocation | null) => setSourceLocation(location), []);
 
   async function selectFile(file: ProjectFile) {
     setError(null);
@@ -283,9 +287,9 @@ export function WorkspacePage() {
         <FileTree files={files} selectedId={selected?.id ?? null} entryFile={project.entryFile} canWrite={project.canWrite} onSelect={(file) => void selectFile(file)} onCreate={() => setNewFileOpen(true)} onUpload={(items) => void uploadFiles(items)} onFileMenu={setFileActions}/>
       </div>
       <div ref={workspaceRef} className="editor-pdf" style={{ '--editor-percent': `${editorPercent}%` } as React.CSSProperties}>
-        <div className="editor-wrap"><Suspense fallback={<LoadingBlock label="Loading editor"/>}><EditorPane api={api} projectHash={hash} file={selected} user={user} canWrite={project.canWrite} dark={theme.resolved === 'dark'} onPresence={onPresence} onFlushReady={onFlushReady}/></Suspense></div>
+        <div className="editor-wrap"><Suspense fallback={<LoadingBlock label="Loading editor"/>}><EditorPane api={api} projectHash={hash} file={selected} user={user} canWrite={project.canWrite} dark={theme.resolved === 'dark'} onPresence={onPresence} onFlushReady={onFlushReady} onCursorChange={onCursorChange}/></Suspense></div>
         <div className="split-handle" role="separator" aria-orientation="vertical" onPointerDown={resizeStart}/>
-        <div className="pdf-wrap"><Suspense fallback={<LoadingBlock label="Loading PDF viewer"/>}><PdfViewer data={pdf} revision={pdfRevision} loading={pdfLoading || compiling} focusMode={focusPdf} onFocusMode={setFocusPdf} projectName={project.name}/></Suspense></div>
+        <div className="pdf-wrap"><Suspense fallback={<LoadingBlock label="Loading PDF viewer"/>}><PdfViewer api={api} projectHash={hash} data={pdf} revision={pdfRevision} synctexJobId={pdfJobId} sourceLocation={sourceLocation} loading={pdfLoading || compiling} focusMode={focusPdf} onFocusMode={setFocusPdf} projectName={project.name}/></Suspense></div>
       </div>
     </main>
     <footer className="workspace-status">

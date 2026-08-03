@@ -129,6 +129,18 @@ export const openapi = {
         responses: { '200': binary('Immutable PDF for this job', 'application/pdf'), '404': error() }
       }
     },
+    '/api/v1/projects/{projectHash}/compile/{jobId}/synctex': {
+      get: {
+        operationId: 'locateSourceInPdf', tags: ['Compile'],
+        parameters: [
+          projectHash,
+          jobId,
+          parameter('path', 'query', true, { type: 'string' }, 'Project-relative source path'),
+          parameter('line', 'query', true, { type: 'integer', minimum: 1 }, 'One-based source line')
+        ],
+        responses: { '200': response('PDF highlight geometry for a source line', 'SyncTexEnvelope'), '404': error() }
+      }
+    },
     '/api/v1/projects/{projectHash}/pdf': {
       get: {
         operationId: 'downloadLatestPdf', tags: ['Compile'], parameters: [projectHash],
@@ -209,6 +221,22 @@ export const openapi = {
       },
       CompileEnvelope: envelope('job', 'CompileJob'),
       NullableCompileEnvelope: { type: 'object', required: ['job'], properties: { job: { oneOf: [{ $ref: '#/components/schemas/CompileJob' }, { type: 'null' }] } } },
+      SyncTexHighlight: {
+        type: 'object', required: ['page', 'x', 'y', 'width', 'height'], properties: {
+          page: { type: 'integer', minimum: 1 }, x: { type: 'number' }, y: { type: 'number' },
+          width: { type: 'number' }, height: { type: 'number' }
+        }
+      },
+      SyncTexEnvelope: {
+        type: 'object', required: ['source', 'highlights'], properties: {
+          source: {
+            type: 'object', required: ['path', 'line', 'mappedLine'], properties: {
+              path: { type: 'string' }, line: { type: 'integer' }, mappedLine: { type: ['integer', 'null'] }
+            }
+          },
+          highlights: { type: 'array', items: { $ref: '#/components/schemas/SyncTexHighlight' } }
+        }
+      },
       AgentContext: {
         type: 'object', required: ['project', 'capabilities', 'concurrency', 'openapi'], properties: {
           project: { $ref: '#/components/schemas/Project' }, capabilities: { type: 'array', items: { type: 'string' } },

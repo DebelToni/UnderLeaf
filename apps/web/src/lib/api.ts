@@ -7,6 +7,7 @@ import type {
   ProjectFile,
   ProjectMember,
   ProjectSummary,
+  SyncTexHighlight,
   Template,
   User
 } from '../types';
@@ -204,6 +205,14 @@ export class ApiClient {
 
   compilePdf(hash: string, jobId: string) {
     return this.bytes(`/api/v1/projects/${encodeURIComponent(hash)}/compile/${encodeURIComponent(jobId)}/pdf`);
+  }
+
+  locateSource(hash: string, jobId: string, path: string, line: number) {
+    const query = new URLSearchParams({ path, line: String(line) });
+    return this.request<{
+      source: { path: string; line: number; mappedLine: number | null };
+      highlights: SyncTexHighlight[];
+    }>(`/api/v1/projects/${encodeURIComponent(hash)}/compile/${encodeURIComponent(jobId)}/synctex?${query}`);
   }
 
   latestPdf(hash: string) {

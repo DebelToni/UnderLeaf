@@ -76,6 +76,19 @@ export interface CompileJob {
   hasSynctex: boolean;
 }
 
+export interface SyncTexHighlight {
+  page: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface SourceLocation {
+  path: string;
+  line: number;
+}
+
 export interface ProjectMember {
   id: string;
   username: string;

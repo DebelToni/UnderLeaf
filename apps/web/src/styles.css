@@ -321,8 +321,9 @@ button:disabled { cursor: default; opacity: .42; }
 .pdf-readout { min-width: 48px; text-align: center; color: var(--muted); font: 680 8px/1 var(--mono); }
 .pdf-scroll { position: relative; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-color: var(--line-strong) transparent; }
 .pdf-pages { min-width: max-content; display: grid; gap: 18px; justify-content: center; padding: 26px 32px 80px; }
-.pdf-page { background: white; box-shadow: 0 2px 10px rgba(0, 0, 0, .12); }
+.pdf-page { position: relative; background: white; box-shadow: 0 2px 10px rgba(0, 0, 0, .12); }
 .pdf-page canvas { display: block; }
+.pdf-source-highlight { position: absolute; z-index: 2; pointer-events: none; border: 1px solid rgba(94, 106, 210, .58); border-left-width: 3px; border-radius: 2px; background: rgba(94, 106, 210, .2); box-shadow: 0 0 0 2px rgba(94, 106, 210, .08); }
 .pdf-empty { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 8px; color: var(--muted); text-align: center; }
 .pdf-empty strong { color: var(--ink-2); font-size: 15px; }
 .pdf-empty span { font-size: 10px; }

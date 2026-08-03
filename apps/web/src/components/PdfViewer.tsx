@@ -1,20 +1,31 @@
 import { ChevronLeft, ChevronRight, Download, Maximize2, Minus, Plus, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
+import type { ApiClient } from '../lib/api';
+import { paintPdfHighlights } from '../lib/pdf-highlight';
 import { afterLayout, capturePdfViewState, restorePdfViewState, type PdfViewState } from '../lib/pdf-state';
+import type { SourceLocation, SyncTexHighlight } from '../types';
 
 GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
 
 export function PdfViewer({
+  api,
+  projectHash,
   data,
   revision,
+  synctexJobId,
+  sourceLocation,
   loading,
   focusMode,
   onFocusMode,
   projectName
 }: {
+  api: ApiClient;
+  projectHash: string;
   data: ArrayBuffer | null;
   revision: string | null;
+  synctexJobId: string | null;
+  sourceLocation: SourceLocation | null;
   loading: boolean;
   focusMode: boolean;
   onFocusMode: (focused: boolean) => void;
@@ -28,6 +39,7 @@ export function PdfViewer({
   const [pageCount, setPageCount] = useState(0);
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sourceHighlights, setSourceHighlights] = useState<SyncTexHighlight[]>([]);
 
   useEffect(() => {
     if (!data || !pages.current) {
@@ -88,6 +100,22 @@ export function PdfViewer({
       void task.destroy();
     };
   }, [data, revision, zoom]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSourceHighlights([]);
+    if (!synctexJobId || !sourceLocation || !data) return;
+    const timer = window.setTimeout(() => {
+      void api.locateSource(projectHash, synctexJobId, sourceLocation.path, sourceLocation.line)
+        .then((result) => { if (!cancelled) setSourceHighlights(result.highlights); })
+        .catch(() => { if (!cancelled) setSourceHighlights([]); });
+    }, 100);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [api, data, projectHash, sourceLocation?.line, sourceLocation?.path, synctexJobId]);
+
+  useEffect(() => {
+    paintPdfHighlights(pages.current, sourceHighlights, zoom);
+  }, [rendering, revision, sourceHighlights, zoom]);
 
   useEffect(() => {
     if (!focusMode) return;

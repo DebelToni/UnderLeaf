@@ -19,7 +19,7 @@ import * as Y from 'yjs';
 import type { ApiClient } from '../lib/api';
 import { colorFor } from '../lib/format';
 import { TicketedYProvider, type ConnectionStatus } from '../lib/y-provider';
-import type { ProjectFile, User } from '../types';
+import type { ProjectFile, SourceLocation, User } from '../types';
 
 export interface PresenceUser {
   clientId: number;
@@ -35,7 +35,8 @@ export function EditorPane({
   canWrite,
   dark,
   onPresence,
-  onFlushReady
+  onFlushReady,
+  onCursorChange
 }: {
   api: ApiClient;
   projectHash: string;
@@ -45,6 +46,7 @@ export function EditorPane({
   dark: boolean;
   onPresence: (users: PresenceUser[]) => void;
   onFlushReady: (flush: (() => Promise<void>) | null) => void;
+  onCursorChange: (location: SourceLocation | null) => void;
 }) {
   const mount = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -55,6 +57,7 @@ export function EditorPane({
     if (!mount.current || !file || file.kind !== 'text') {
       onPresence([]);
       onFlushReady(null);
+      onCursorChange(null);
       return;
     }
     const themeCompartment = new Compartment();
@@ -62,6 +65,13 @@ export function EditorPane({
     themeCompartmentRef.current = themeCompartment;
     const doc = new Y.Doc();
     let provider: TicketedYProvider | null = null;
+    let reportedLine = 0;
+    const reportCursor = (view: EditorView) => {
+      const line = view.state.doc.lineAt(view.state.selection.main.head).number;
+      if (line === reportedLine) return;
+      reportedLine = line;
+      onCursorChange({ path: file.path, line });
+    };
     const extensions = [
       lineNumbers(),
       highlightActiveLineGutter(),
@@ -75,6 +85,9 @@ export function EditorPane({
       latex(),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
       placeholder('Start writing LaTeX…'),
+      EditorView.updateListener.of((update) => {
+        if (update.selectionSet || update.docChanged) reportCursor(update.view);
+      }),
       themeCompartment.of(editorTheme(dark)),
       readOnlyCompartment.of(EditorState.readOnly.of(true))
     ];
@@ -111,6 +124,7 @@ export function EditorPane({
       parent: mount.current
     });
     viewRef.current = view;
+    reportCursor(view);
     const unsubscribe = provider?.subscribe((status) => {
       setConnection(status);
       view.dispatch({ effects: readOnlyCompartment.reconfigure(EditorState.readOnly.of(!canWrite || status !== 'connected')) });
@@ -126,8 +140,9 @@ export function EditorPane({
       themeCompartmentRef.current = null;
       doc.destroy();
       onPresence([]);
+      onCursorChange(null);
     };
-  }, [api, projectHash, file?.id, file?.content, canWrite, user.id, user.displayName, onPresence, onFlushReady]);
+  }, [api, projectHash, file?.id, file?.content, file?.path, canWrite, user.id, user.displayName, onPresence, onFlushReady, onCursorChange]);
 
   useEffect(() => {
     const view = viewRef.current;
