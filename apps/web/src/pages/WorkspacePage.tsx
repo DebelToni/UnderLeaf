@@ -19,6 +19,10 @@ import { useTheme } from '../hooks/useTheme';
 import { ApiError } from '../lib/api';
 import { initials, relativeTime } from '../lib/format';
 import { useSession } from '../lib/session';
+import {
+  loadEditorPercent, loadTreeOpen, MAX_EDITOR_PERCENT, MIN_EDITOR_PERCENT,
+  storeEditorPercent, storeTreeOpen
+} from '../lib/workspace-state';
 import type { CompileJob, ProjectDetail, ProjectEvent, ProjectFile, SourceLocation } from '../types';
 
 const EditorPane = lazy(() => import('../components/EditorPane').then((module) => ({ default: module.EditorPane })));
@@ -43,9 +47,9 @@ export function WorkspacePage() {
   const [activity, setActivity] = useState<string | null>(null);
   const [presence, setPresence] = useState<PresenceUser[]>([]);
   const [historyKey, setHistoryKey] = useState(0);
-  const [treeOpen, setTreeOpen] = useState(true);
+  const [treeOpen, setTreeOpen] = useState(loadTreeOpen);
   const [mobilePane, setMobilePane] = useState<'files' | 'editor' | 'pdf'>('editor');
-  const [editorPercent, setEditorPercent] = useState(() => Number(localStorage.getItem('underleaf.editorSplit') ?? 50));
+  const [editorPercent, setEditorPercent] = useState(loadEditorPercent);
   const [focusPdf, setFocusPdf] = useState(false);
   const [newFileOpen, setNewFileOpen] = useState(false);
   const [fileActions, setFileActions] = useState<ProjectFile | null>(null);
@@ -238,6 +242,12 @@ export function WorkspacePage() {
 
   const onFlushReady = useCallback((flush: (() => Promise<void>) | null) => { editorFlush.current = flush; }, []);
 
+  function toggleTree() {
+    const next = !treeOpen;
+    setTreeOpen(next);
+    storeTreeOpen(next);
+  }
+
   function resizeStart(event: React.PointerEvent) {
     const container = workspaceRef.current;
     if (!container) return;
@@ -245,11 +255,18 @@ export function WorkspacePage() {
     const bounds = container.getBoundingClientRect();
     let latestPercent = editorPercent;
     const move = (next: PointerEvent) => {
-      latestPercent = Math.min(75, Math.max(25, ((next.clientX - bounds.left) / bounds.width) * 100));
+      latestPercent = Math.min(MAX_EDITOR_PERCENT, Math.max(MIN_EDITOR_PERCENT, ((next.clientX - bounds.left) / bounds.width) * 100));
       setEditorPercent(latestPercent);
     };
-    const done = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', done); localStorage.setItem('underleaf.editorSplit', String(latestPercent)); };
-    window.addEventListener('pointermove', move); window.addEventListener('pointerup', done);
+    const done = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', done);
+      window.removeEventListener('pointercancel', done);
+      storeEditorPercent(latestPercent);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', done);
+    window.addEventListener('pointercancel', done);
   }
 
   if (loading) return <div className="workspace-loading"><Brand/><LoadingBlock label="Opening project"/></div>;
@@ -282,14 +299,14 @@ export function WorkspacePage() {
       <button role="tab" aria-selected={mobilePane === 'pdf'} onClick={() => setMobilePane('pdf')}><FileText size={14}/> PDF</button>
     </div>
     <main className="workspace-body">
-      <button className="tree-toggle" type="button" onClick={() => setTreeOpen(!treeOpen)} aria-label={treeOpen ? 'Hide file tree' : 'Show file tree'}>{treeOpen ? <PanelLeftClose size={15}/> : <PanelLeftOpen size={15}/>}</button>
+      <button className="tree-toggle" type="button" onClick={toggleTree} aria-label={treeOpen ? 'Hide file tree' : 'Show file tree'}>{treeOpen ? <PanelLeftClose size={15}/> : <PanelLeftOpen size={15}/>}</button>
       <div className={`workspace-tree-wrap ${treeOpen ? '' : 'is-collapsed'}`}>
         <FileTree files={files} selectedId={selected?.id ?? null} entryFile={project.entryFile} canWrite={project.canWrite} onSelect={(file) => void selectFile(file)} onCreate={() => setNewFileOpen(true)} onUpload={(items) => void uploadFiles(items)} onFileMenu={setFileActions}/>
       </div>
       <div ref={workspaceRef} className="editor-pdf" style={{ '--editor-percent': `${editorPercent}%` } as React.CSSProperties}>
         <div className="editor-wrap"><Suspense fallback={<LoadingBlock label="Loading editor"/>}><EditorPane api={api} projectHash={hash} file={selected} user={user} canWrite={project.canWrite} dark={theme.resolved === 'dark'} onPresence={onPresence} onFlushReady={onFlushReady} onCursorChange={onCursorChange}/></Suspense></div>
         <div className="split-handle" role="separator" aria-orientation="vertical" onPointerDown={resizeStart}/>
-        <div className="pdf-wrap"><Suspense fallback={<LoadingBlock label="Loading PDF viewer"/>}><PdfViewer api={api} projectHash={hash} data={pdf} revision={pdfRevision} synctexJobId={pdfJobId} sourceLocation={sourceLocation} loading={pdfLoading || compiling} focusMode={focusPdf} onFocusMode={setFocusPdf} projectName={project.name}/></Suspense></div>
+        <div className="pdf-wrap"><Suspense fallback={<LoadingBlock label="Loading PDF viewer"/>}><PdfViewer key={hash} api={api} projectHash={hash} data={pdf} revision={pdfRevision} synctexJobId={pdfJobId} sourceLocation={sourceLocation} loading={pdfLoading || compiling} focusMode={focusPdf} onFocusMode={setFocusPdf} projectName={project.name}/></Suspense></div>
       </div>
     </main>
     <footer className="workspace-status">

@@ -3,7 +3,10 @@ import { useEffect, useRef, useState } from 'react';
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import type { ApiClient } from '../lib/api';
 import { paintPdfHighlights } from '../lib/pdf-highlight';
-import { afterLayout, capturePdfViewState, restorePdfViewState, type PdfViewState } from '../lib/pdf-state';
+import {
+  afterLayout, capturePdfViewState, loadStoredPdfViewState, restorePdfViewState,
+  storePdfViewState, type PdfViewState
+} from '../lib/pdf-state';
 import type { SourceLocation, SyncTexHighlight } from '../types';
 
 GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
@@ -33,9 +36,14 @@ export function PdfViewer({
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const pages = useRef<HTMLDivElement>(null);
-  const preserved = useRef<PdfViewState>({ scrollTop: 0, scrollLeft: 0, zoom: 1, page: 1 });
-  const [zoom, setZoom] = useState(() => window.innerWidth <= 720 ? 0.5 : 1);
-  const [page, setPage] = useState(1);
+  const [initialView] = useState(() => loadStoredPdfViewState(projectHash, window.innerWidth <= 720 ? 0.5 : 1));
+  const preserved = useRef<PdfViewState>(initialView);
+  const saveTimer = useRef<number | null>(null);
+  const canPersist = useRef(false);
+  const [zoom, setZoom] = useState(initialView.zoom);
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const [page, setPage] = useState(initialView.page);
   const [pageCount, setPageCount] = useState(0);
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,16 +89,23 @@ export function PdfViewer({
             renderJobs.push(pdfPage.render({ canvas, canvasContext: context, viewport, transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0] }).promise);
           }
         }
-        preserved.current = capturePdfViewState(scroller.current, zoom, visiblePage());
+        if (pages.current.childElementCount) preserved.current = capturePdfViewState(scroller.current, zoom, visiblePage());
+        canPersist.current = false;
         pages.current.replaceChildren(fragment);
         await Promise.all(renderJobs);
         if (cancelled) return;
         setRendering(false);
         setPage(Math.min(preserved.current.page, pdf.numPages));
-        afterLayout(() => restorePdfViewState(scroller.current, preserved.current));
+        afterLayout(() => {
+          if (cancelled) return;
+          restorePdfViewState(scroller.current, preserved.current);
+          canPersist.current = true;
+          persistViewState();
+        });
       })
       .catch((reason: unknown) => {
         if (cancelled) return;
+        canPersist.current = Boolean(pages.current?.childElementCount);
         setRendering(false);
         setError(reason instanceof Error ? reason.message : 'The PDF could not be displayed');
       });
@@ -126,6 +141,19 @@ export function PdfViewer({
     return () => document.removeEventListener('keydown', escape);
   }, [focusMode, onFocusMode]);
 
+  useEffect(() => {
+    const flush = () => {
+      if (saveTimer.current != null) window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      persistViewState();
+    };
+    window.addEventListener('pagehide', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      flush();
+    };
+  }, [projectHash]);
+
   function visiblePage() {
     const root = scroller.current;
     if (!root) return 1;
@@ -138,8 +166,33 @@ export function PdfViewer({
     return current;
   }
 
+  function persistViewState() {
+    if (!canPersist.current) return;
+    const state = capturePdfViewState(scroller.current, zoomRef.current, visiblePage());
+    preserved.current = state;
+    storePdfViewState(projectHash, state);
+  }
+
+  function scheduleViewStateSave() {
+    if (saveTimer.current != null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      saveTimer.current = null;
+      persistViewState();
+    }, 150);
+  }
+
   function trackPage() {
     setPage(visiblePage());
+    scheduleViewStateSave();
+  }
+
+  function adjustZoom(delta: number) {
+    const next = Math.min(2.5, Math.max(0.5, Math.round((zoom + delta) * 10) / 10));
+    if (next === zoom) return;
+    zoomRef.current = next;
+    setZoom(next);
+    canPersist.current = true;
+    persistViewState();
   }
 
   function goToPage(next: number) {
@@ -169,9 +222,9 @@ export function PdfViewer({
           <button type="button" className="icon-button" disabled={page >= pageCount} onClick={() => goToPage(page + 1)} aria-label="Next page"><ChevronRight size={15}/></button>
         </div>
         <div className="pdf-toolbar__group" aria-label="Zoom controls">
-          <button type="button" className="icon-button" disabled={zoom <= 0.5} onClick={() => setZoom((value) => Math.max(0.5, value - 0.1))} aria-label="Zoom out"><Minus size={14}/></button>
+          <button type="button" className="icon-button" disabled={zoom <= 0.5} onClick={() => adjustZoom(-0.1)} aria-label="Zoom out"><Minus size={14}/></button>
           <span className="pdf-readout">{Math.round(zoom * 100)}%</span>
-          <button type="button" className="icon-button" disabled={zoom >= 2.5} onClick={() => setZoom((value) => Math.min(2.5, value + 0.1))} aria-label="Zoom in"><Plus size={14}/></button>
+          <button type="button" className="icon-button" disabled={zoom >= 2.5} onClick={() => adjustZoom(0.1)} aria-label="Zoom in"><Plus size={14}/></button>
         </div>
         <span className="pdf-toolbar__spacer"/>
         <button type="button" className="icon-button" disabled={!data} onClick={download} aria-label="Download PDF"><Download size={15}/></button>
