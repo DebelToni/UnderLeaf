@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { config, repoRoot } from './config.js';
@@ -312,6 +312,7 @@ export class Compiler {
   }
 
   private async prepareWorker(): Promise<void> {
+    const jobsMountDir = await realpath(this.jobsDir);
     const docker = await command('docker', ['info'], 15_000);
     if (docker.code !== 0) throw new Error('Docker is not running. Open Docker Desktop and compile again.');
 
@@ -323,7 +324,7 @@ export class Compiler {
     }
 
     const inspect = await command('docker', ['inspect', config.dockerContainer], 15_000);
-    if (inspect.code === 0 && workerMatches(inspect.stdout, image.stdout, this.jobsDir)) return;
+    if (inspect.code === 0 && workerMatches(inspect.stdout, image.stdout, jobsMountDir)) return;
     if (inspect.code === 0) await command('docker', ['rm', '-f', config.dockerContainer], 20_000);
     await command('docker', ['volume', 'create', 'underleaf-tectonic-cache'], 20_000);
     const started = await command(
@@ -346,7 +347,7 @@ export class Compiler {
         '-v',
         'underleaf-tectonic-cache:/var/cache/tectonic',
         '-v',
-        `${this.jobsDir}:/work:rw`,
+        `${jobsMountDir}:/work:rw`,
         config.dockerImage
       ],
       60_000
