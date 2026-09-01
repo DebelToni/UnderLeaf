@@ -3,7 +3,7 @@ node_modules/
 .env
 .env.*
 !.env.example
-data/
+/data
 coverage/
 playwright-report/
 test-results/
