@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -9,6 +9,8 @@ const docsDir = join(root, 'docs');
 const discoveryPath = join(docsDir, 'api.json');
 const localBase = `http://${process.env.UNDERLEAF_HOST ?? '127.0.0.1'}:${process.env.UNDERLEAF_PORT ?? '4317'}`;
 const tunnelPattern = /https:\/\/[a-zA-Z0-9.-]+\.trycloudflare\.com/g;
+const skipStartupBuild = process.env.UNDERLEAF_SKIP_STARTUP_BUILD === '1';
+const publishOffline = process.env.UNDERLEAF_PUBLISH_OFFLINE !== '0';
 let backend;
 let tunnel;
 let stopping = false;
@@ -19,8 +21,10 @@ process.once('SIGINT', () => void stop('Stopping UnderLeaf…', 0));
 process.once('SIGTERM', () => void stop('Stopping UnderLeaf…', 0));
 
 try {
-  run('pnpm', ['--filter', '@underleaf/server', 'build']);
-  run('pnpm', ['build:pages']);
+  if (!skipStartupBuild) {
+    run('pnpm', ['--filter', '@underleaf/server', 'build']);
+    run('pnpm', ['build:pages']);
+  }
 
   backend = spawn(process.execPath, ['apps/server/dist/index.js'], {
     cwd: root,
@@ -33,8 +37,7 @@ try {
   await waitForHealth();
 
   const url = await startReachableTunnel();
-  await writeDiscovery(true, url);
-  publish('site: publish current tunnel');
+  if (await writeDiscovery(true, url)) publish('site: publish current tunnel');
 
   console.log(`\nUnderLeaf is online:\n  App: ${stableAppUrl()}\n  API: ${url}\n\nPress Ctrl+C to stop.\n`);
   await new Promise(() => {});
@@ -142,10 +145,17 @@ async function waitForPublicHealth(apiBase) {
 
 async function writeDiscovery(online, apiBase) {
   await mkdir(docsDir, { recursive: true });
+  try {
+    const current = JSON.parse(await readFile(discoveryPath, 'utf8'));
+    if (current.online === online && current.apiBase === apiBase) return false;
+  } catch {
+    // Write a valid discovery document when the existing file is absent or malformed.
+  }
   await writeFile(
     discoveryPath,
     `${JSON.stringify({ online, apiBase, updatedAt: new Date().toISOString() }, null, 2)}\n`
   );
+  return true;
 }
 
 function publish(message) {
@@ -164,12 +174,13 @@ async function stop(message, code) {
   stopPromise = (async () => {
     console.log(`\n${message}`);
     await Promise.all([terminate(tunnel, 5_000), terminate(backend, 70_000)]);
-    try {
-      await writeDiscovery(false, '');
-      publish('site: mark server offline');
-    } catch (error) {
-      console.error('Could not publish the offline state:', error);
-      code = 1;
+    if (publishOffline) {
+      try {
+        if (await writeDiscovery(false, '')) publish('site: mark server offline');
+      } catch (error) {
+        console.error('Could not publish the offline state:', error);
+        code = 1;
+      }
     }
     process.exit(code);
   })();
