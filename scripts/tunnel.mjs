@@ -21,6 +21,11 @@ process.once('SIGINT', () => void stop('Stopping UnderLeaf…', 0));
 process.once('SIGTERM', () => void stop('Stopping UnderLeaf…', 0));
 
 try {
+  const pidFile = process.env.UNDERLEAF_PID_FILE;
+  if (pidFile) {
+    await mkdir(dirname(pidFile), { recursive: true });
+    await writeFile(pidFile, `${process.pid}\n`, { mode: 0o600 });
+  }
   if (!skipStartupBuild) {
     run('pnpm', ['--filter', '@underleaf/server', 'build']);
     run('pnpm', ['build:pages']);
